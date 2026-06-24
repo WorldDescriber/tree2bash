@@ -7,10 +7,12 @@ Parses tree-like directory structure output and generates bash script.
 
 Grammar:
     FileEntry = { LineElement };
-    LineElement = Prefix, (DirectoryName | Filename), Postfix;
+    #LineElement = Prefix, (DirectoryName | Filename), Postfix;
+    LineElement = Prefix, [DirectoryName | Filename], Postfix;
     Prefix = { PrefixChar };
     PrefixChar = UnicodeChar | Whitespace;
     Postfix = { MiddleChar }, Terminator;
+    #MiddleChar = Whitespace | OperatorChar;
     MiddleChar = Whitespace
     Terminator = Newline | Comment;
     
@@ -18,9 +20,29 @@ Terminal symbols:
     DirectoryName = DIRECTORY_NAME TOKEN (ends with / or \)
     Filename = FILENAME TOKEN (any valid filename, no dot required)
     Whitespace = WHITESPACE TOKEN
+    #OperatorChar = OPERATOR TOKEN
     Newline = NEWLINE TOKEN
     Comment = COMMENT TOKEN
     UnicodeChar = UNICODE_CHAR TOKEN
+v1.1 fail on new project structure, so I need to fix
+this will be v1.2
+changes:
+1. python3 tree2bash.py (let output look better)
+2. python3 tree2bash.py project_structures/round1/project_structure_tiny.txt
+   let bash script look better
+3. need handle new situation
+│       └── test_final.py          # 最终集成测试
+│
+└── examples/                      # 示例脚本
+    LineElement = Prefix, (DirectoryName | Filename), Postfix;
+    to
+    LineElement = Prefix, [DirectoryName | Filename], Postfix;
+4. │   ├── test_mask/                 # 掩模模块测试
+│   ├── test_optics/               # 光学模块测试
+│   ├── test_resist/               # 光刻胶模块测试
+we create empty directory cd to it, need out
+we need use cd direcotry when next line is deeper
+
 """
 
 import sys
@@ -38,8 +60,14 @@ import ast
 class TokenType(Enum):
     """Enumeration of all token types"""
     DIRECTORY_NAME = "DIRECTORY_NAME"  # New: identifier ending with / or \
+    #NUMBER = "NUMBER"
+    #STRING = "STRING"
     COMMENT = "COMMENT"
     FILENAME = "FILENAME"  # Modified: no dot required
+    #FILE_EXTENSION = "FILE_EXTENSION"
+    #PATH_SEPARATOR = "PATH_SEPARATOR"
+    #OPERATOR = "OPERATOR"
+    #DELIMITER = "DELIMITER"
     WHITESPACE = "WHITESPACE"
     NEWLINE = "NEWLINE"
     UNICODE_CHAR = "UNICODE_CHAR"
@@ -64,6 +92,27 @@ class Token:
 
 class LexicalAnalyzer:
     """Lexical analyzer for tree-like UTF-8 directory structure text"""
+    
+    #FILE_EXTENSIONS = {
+    #    '.txt', '.py', '.js', '.java', '.c', '.cpp', '.h', '.html', '.css',
+    #    '.json', '.xml', '.yaml', '.yml', '.md', '.rst', '.csv', '.log',
+    #    '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico', '.pdf', '.doc',
+    #    '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.tar', '.gz',
+    #    '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.pl', '.sh', '.bat',
+    #    '.exe', '.dll', '.so', '.dylib', '.class', '.jar', '.war',
+    #    '.mp3', '.mp4', '.avi', '.mov', '.wav', '.flac', '.ogg',
+    #    '.yml', '.toml', '.ini', '.cfg', '.conf', '.env'
+    #}
+    
+    #OPERATORS = {
+    #    '+', '-', '*', '/', '=', '==', '!=', '<', '>', '<=', '>=',
+    #    '&&', '||', '!', '&', '|', '^', '~', '<<', '>>',
+    #    '+=', '-=', '*=', '/=', '%=', '**', '//', '::', '->', '=>'
+    #}
+    
+    #DELIMITERS = {
+    #    '(', ')', '{', '}', '[', ']', ';', ':', ','
+    #}
     
     # Unicode tree-drawing characters
     TREE_CHARS = {
@@ -150,6 +199,7 @@ class LexicalAnalyzer:
         if char == '\0':
             return False
         return True
+        #return self.is_letter(char) or char == '_' char == '.'
     def is_mac_file_name_start(self, char: str) -> bool:
         if not char:
             return False
@@ -209,6 +259,44 @@ class LexicalAnalyzer:
                 break
         return value, start_line, start_col
     
+    #def read_string(self) -> Tuple[str, int, int]:
+    #    start_line = self.line
+    #    start_col = self.column
+    #    self.advance()  # consume opening quote
+    #    value = '"'
+    #    while True:
+    #        char = self.advance()
+    #        if char is None:
+    #            raise SyntaxError(f"Unterminated string at line {start_line}, col {start_col}")
+    #        if char == '"':
+    #            value += '"'
+    #            break
+    #        if char == '\\':
+    #            next_char = self.advance()
+    #            if next_char is None:
+    #                raise SyntaxError(f"Unterminated string at line {start_line}, col {start_col}")
+    #            value += '\\' + next_char
+    #        else:
+    #            value += char
+    #    return value, start_line, start_col
+    
+    #def read_number(self) -> Tuple[str, int, int]:
+    #    start_line = self.line
+    #    start_col = self.column
+    #    value = ''
+    #    has_decimal = False
+    #    if self.get_next_char() in '+-':
+    #        value += self.advance()
+    #    while True:
+    #        char = self.get_next_char()
+    #        if char and self.is_digit(char):
+    #            value += self.advance()
+    #        elif char == '.' and not has_decimal:
+    #            has_decimal = True
+    #            value += self.advance()
+    #        else:
+    #            break
+    #    return value, start_line, start_col
     
     def read_name(self) -> Tuple[Optional[str], int, int, bool]:
         """
@@ -258,6 +346,20 @@ class LexicalAnalyzer:
             value += char
         return value, start_line, start_col
     
+    #def read_operator(self) -> Tuple[str, int, int]:
+    #    start_line = self.line
+    #    start_col = self.column
+    #    value = ''
+    #    for length in range(3, 0, -1):
+    #        if self.position + length <= len(self.text):
+    #            potential = self.text[self.position:self.position + length]
+    #            if potential in self.OPERATORS:
+    #                for _ in range(length):
+    #                    self.advance()
+    #                return potential, start_line, start_col
+    #    char = self.advance()
+    #    return char, start_line, start_col
+    
     def tokenize(self) -> List[Token]:
         self.tokens = []
         while self.position < len(self.text):
@@ -285,6 +387,32 @@ class LexicalAnalyzer:
                 self.tokens.append(Token(TokenType.COMMENT, value, line, col))
                 continue
             
+            # Handle strings
+            #if char == '"':
+            #    value, line, col = self.read_string()
+            #    self.tokens.append(Token(TokenType.STRING, value, line, col))
+            #    continue
+            
+            # Handle numbers
+            #if char and (self.is_digit(char) or char in '+-'):
+            #    next_char = self.peek_next_char()
+            #    if self.is_digit(char) or (char in '+-' and next_char and self.is_digit(next_char)):
+            #        value, line, col = self.read_number()
+            #        self.tokens.append(Token(TokenType.NUMBER, value, line, col))
+            #        continue
+            
+            # have problem
+            # Handle names (filenames or directory names)
+            #if char and (self.is_identifier_start(char) or self.is_digit(char) or char in '.-_~'):
+            #    name_result = self.read_name()
+            #    if name_result[0] is not None:
+            #        value, line, col, is_directory = name_result
+            #        if is_directory:
+            #            self.tokens.append(Token(TokenType.DIRECTORY_NAME, value, line, col))
+            #        else:
+            #            self.tokens.append(Token(TokenType.FILENAME, value, line, col))
+            #        continue
+            # my change
             if char and self.is_allowed_name_start(char):
                 #or self.is_digit(char) or char in '.-_~'):
                 name_result = self.read_name()
@@ -302,6 +430,18 @@ class LexicalAnalyzer:
                 # Treat tree chars as Unicode characters
                 self.tokens.append(Token(TokenType.UNICODE_CHAR, value, self.line, self.column - 1))
                 continue
+            
+            # Handle operators
+            #if char in self.OPERATORS or any(char in op for op in self.OPERATORS):
+            #    value, line, col = self.read_operator()
+            #    self.tokens.append(Token(TokenType.OPERATOR, value, line, col))
+            #    continue
+            
+            # Handle delimiters and dots
+            #if char in self.DELIMITERS or char == '.':
+            #    value = self.advance()
+            #    self.tokens.append(Token(TokenType.DELIMITER, value, self.line, self.column - 1))
+            #    continue
             
             # Handle any other Unicode characters
             value = self.advance()
@@ -331,6 +471,7 @@ class ParseNodeType(Enum):
     DIRECTORY_NAME = "DirectoryName"  # New
     FILENAME = "Filename"
     WHITESPACE = "Whitespace"
+    #OPERATOR_CHAR = "OperatorChar"
     NEWLINE = "Newline"
     COMMENT = "Comment"
     UNICODE_CHAR = "UnicodeChar"
@@ -380,10 +521,12 @@ class SyntaxAnalyzer:
     """
     Syntax analyzer implementing the grammar:
         FileEntry = { LineElement };
-        LineElement = Prefix, (DirectoryName | Filename), Postfix;
+        #LineElement = Prefix, (DirectoryName | Filename), Postfix;
+        LineElement = Prefix, [DirectoryName | Filename], Postfix;
         Prefix = { PrefixChar };
         PrefixChar = UnicodeChar | Whitespace;
         Postfix = { MiddleChar }, Terminator;
+        #MiddleChar = Whitespace | OperatorChar;
         MiddleChar = Whitespace
         Terminator = Newline | Comment;
     
@@ -391,6 +534,7 @@ class SyntaxAnalyzer:
         DirectoryName = DIRECTORY_NAME TOKEN
         Filename = FILENAME TOKEN
         Whitespace = WHITESPACE TOKEN
+        #OperatorChar = OPERATOR TOKEN
         Newline = NEWLINE TOKEN
         Comment = COMMENT TOKEN
         UnicodeChar = UNICODE_CHAR TOKEN
@@ -493,13 +637,13 @@ class SyntaxAnalyzer:
         main_node = self.parse_main_content()
         if main_node:
             line_node.add_child(main_node)
-        else:
-            token = self.current_token()
-            if token:
-                self.errors.append(f"Expected DirectoryName or Filename at line {token.line}, col {token.column}, got {token.type.value}")
-            else:
-                self.errors.append("Expected DirectoryName or Filename, got EOF")
-            return None
+        #else:
+        #    token = self.current_token()
+        #    if token:
+        #        self.errors.append(f"Expected DirectoryName or Filename at line {token.line}, col {token.column}, got {token.type.value}")
+        #    else:
+        #        self.errors.append("Expected DirectoryName or Filename, got EOF")
+        #    return None
         
         # Parse Postfix
         postfix_node = self.parse_postfix()
@@ -590,6 +734,7 @@ class SyntaxAnalyzer:
     def parse_postfix(self) -> ParseNode:
         """
         Postfix = { MiddleChar }, Terminator;
+        #MiddleChar = Whitespace | OperatorChar;
         MiddleChar = Whitespace
         Terminator = Newline | Comment;
         """
@@ -631,6 +776,7 @@ class SyntaxAnalyzer:
     
     def parse_middle_char(self) -> Optional[ParseNode]:
         """
+        #MiddleChar = Whitespace | OperatorChar;
         MiddleChar = Whitespace
         """
         token = self.current_token()
@@ -644,6 +790,21 @@ class SyntaxAnalyzer:
             child = ParseNode(ParseNodeType.WHITESPACE, repr(token.value), token=token)
             node.add_child(child)
             return node
+        
+        #elif token.type == TokenType.OPERATOR:
+        #    token = self.advance()
+        #    child = ParseNode(ParseNodeType.OPERATOR_CHAR, token.value, token=token)
+        #    node.add_child(child)
+        #    return node
+        
+        #elif token.type in (TokenType.DELIMITER, TokenType.STRING, TokenType.NUMBER):
+        #elif token.type in (TokenType.DELIMITER, TokenType.STRING):
+        #elif token.type in (TokenType.DELIMITER):
+        #    token = self.advance()
+        #    child = ParseNode(ParseNodeType.OPERATOR_CHAR, token.value, token=token)
+        #    node.add_child(child)
+        #    self.warnings.append(f"Treating {token.type.value} as OperatorChar at line {token.line}, col {token.column}")
+        #    return node
         
         return None
     
@@ -800,8 +961,8 @@ def generate_bash_script(parse_tree: ParseNode, original_filename: str = None) -
     bash_lines = []
     bash_lines.append("#!/bin/bash")
     bash_lines.append("# Auto-generated bash script to create project structure")
-    bash_lines.append("# Generated from parse tree analysis")
-    bash_lines.append("")
+    #bash_lines.append("# Generated from parse tree analysis")
+    #bash_lines.append("")
     
     prev_prefix_char_count = 0
     depth_stack = []  # Stack to track directory depths
@@ -817,7 +978,21 @@ def generate_bash_script(parse_tree: ParseNode, original_filename: str = None) -
         return f"'{escaped}'"
     
     line_index = 0
+    prev_directory_name = ""
+    #print("root node",parse_tree)
     for element in parse_tree.children:
+        #print("each line",element)
+        #print("each element children")
+        #i = 0
+        #while i<len(element.children):
+        #    print(element.children[i])
+        #    #print(len(element.children[i]))#wrong code
+        #    print("token",element.children[i].token)
+        #    print("value",element.children[i].value)
+        #    #print("token value",element.children[i].token.value)#wrong code
+        #    #print("token length",len(element.children[i].token))#wrong code
+        #    i+=1
+         
         if element.type != ParseNodeType.LINE_ELEMENT:
             continue
         
@@ -825,12 +1000,43 @@ def generate_bash_script(parse_tree: ParseNode, original_filename: str = None) -
             continue
         
         prefix_node = element.children[0]
+        #if prefix_node:
+        #    #print("prefix node",prefix_node)
+        #    print("each prefix node children")
+        #    i = 0
+        #    while i<len(prefix_node.children):
+        #        node = prefix_node.children[i]
+        #        print("node type",node.type)
+        #        if node.value:
+        #            print("node value",node.value)
+        #        else:
+        #            print("node value empty")
+        #        print("node child")
+        #        for child in node.children:
+        #            print("child ",child)
+        #            print("child type",type(child))
+        #            print("child value",type(child.value))
+        #            print("child string length",len(child.value))
+        #        #print(prefix_node.children[i])
+        #        #print("value",prefix_node.children[i].value)
+        #        #print("token",prefix_node.children[i].token)
+        #        #print("length ",len(prefix_node.children[i]))
+        #        #print("type",type(prefix_node.children[i]))
+        #        #print("value",prefix_node.children[i].token)
+        #        #print("token",element.children[i].token)
+        #        #print("value",element.children[i].value)
+        #        i+=1
+        #else:
+        #    print("prefix node in none")
 
         main_node = element.children[1]
         
         if prefix_node.type != ParseNodeType.PREFIX:
             continue
-        
+        if not (main_node.type == ParseNodeType.FILENAME or main_node.type == ParseNodeType.DIRECTORY_NAME):
+            continue
+       
+        #current_prefix_count = count_prefix_chars(prefix_node)
         current_prefix_count = 0
         if prefix_node:
             i = 0
@@ -841,18 +1047,32 @@ def generate_bash_script(parse_tree: ParseNode, original_filename: str = None) -
                 i+=1
 
         line_index += 1
-        
+        #print("line",line_index)
+        #print("current prefix count",current_prefix_count)
+        if current_prefix_count > prev_prefix_char_count:
+            # Need to go up: (prev - current) / 4 directories
+            depth_diff = ( current_prefix_count - prev_prefix_char_count ) // 4
+            if depth_diff == 1:
+                if prev_directory_name:
+                    bash_lines.append(f"cd {prev_directory_name}")
+                    depth_stack.append(main_node.value)
+                    #bash_lines.append(f"# Moving up {depth_diff} level(s)")
+                else:
+                    return bash_text, False
+            else:
+                return bash_text, False
+
         # Calculate depth change
         if current_prefix_count < prev_prefix_char_count:
             # Need to go up: (prev - current) / 4 directories
             depth_diff = (prev_prefix_char_count - current_prefix_count) // 4
             if depth_diff > 0:
-                bash_lines.append(f"# Moving up {depth_diff} level(s)")
+                #bash_lines.append(f"# Moving up {depth_diff} level(s)")
                 for _ in range(depth_diff):
                     bash_lines.append("cd ..")
                     if depth_stack:
                         depth_stack.pop()
-                bash_lines.append("")
+                #bash_lines.append("")
         
         prev_prefix_char_count = current_prefix_count
         
@@ -860,23 +1080,26 @@ def generate_bash_script(parse_tree: ParseNode, original_filename: str = None) -
         name = escape_bash_string(main_node.value)
         
         if main_node.type == ParseNodeType.DIRECTORY_NAME:
-            bash_lines.append(f"# Creating directory: {main_node.value}")
+            #bash_lines.append(f"# Creating directory: {main_node.value}")
             bash_lines.append(f"mkdir -p {name}")
-            bash_lines.append(f"cd {name}")
-            bash_lines.append("")
-            depth_stack.append(main_node.value)
+            prev_directory_name = name
+            # simply cd direcotry is not good for many empty direcotry at same level
+            #bash_lines.append(f"cd {name}")
+            #bash_lines.append("")
+            #depth_stack.append(main_node.value)
             
         elif main_node.type == ParseNodeType.FILENAME:
-            bash_lines.append(f"# Creating file: {main_node.value}")
+            #bash_lines.append(f"# Creating file: {main_node.value}")
             bash_lines.append(f"touch {name}")
-            bash_lines.append("")
+            prev_directory_name = ""
+            #bash_lines.append("")
     
     # Return to root directory at the end
     while depth_stack:
         bash_lines.append("cd ..")
         depth_stack.pop()
     
-    bash_lines.append("")
+    #bash_lines.append("")
     bash_lines.append("echo 'Project structure created successfully!'")
     
     bash_text = '\n'.join(bash_lines) + '\n'
@@ -1106,22 +1329,96 @@ def analyze_file(filepath: str) -> None:
             text = file.read()
         
         print(f"\n{'='*80}")
+        #print(f"Analyzing file: {filepath}")
+        #print(f"File size: {len(text)} characters")
+        #print(f"{'='*80}\n")
+        
+        # Lexical Analysis
+        #print("Phase 1: Lexical Analysis")
+        #print("-" * 40)
         lexer = LexicalAnalyzer(text, os.path.basename(filepath))
         tokens = lexer.tokenize()
-
+        #for token in tokens:
+        #    print(token)
+        #print(f"✓ Generated {len(tokens)} tokens")
+        
+        # Syntax Analysis
+        #print("\nPhase 2: Syntax Analysis")
+        #print("-" * 40)
         parser = SyntaxAnalyzer(tokens)
         parse_tree = parser.parse()
+        #parser.print_summary()
+        #parser.print_line_elements()
+        
+        # Show grammar rules
+        #print("\n" + "="*80)
+        #print("GRAMMAR RULES")
+        #print("="*80)
+        #print("FileEntry      = { LineElement };")
+        #print("LineElement    = Prefix, (DirectoryName | Filename), Postfix;")
+        #print("Prefix         = { PrefixChar };")
+        #print("PrefixChar     = UnicodeChar | Whitespace;")
+        #print("Postfix        = { MiddleChar }, Terminator;")
+        ##print("MiddleChar     = Whitespace | OperatorChar;")
+        #print("MiddleChar     = Whitespace ;")
+        #print("Terminator     = Newline | Comment;")
+        #print("\nTerminal symbols:")
+        #print("  DirectoryName = DIRECTORY_NAME TOKEN (ends with / or \\)")
+        #print("  Filename      = FILENAME TOKEN")
+        #print("  Whitespace    = WHITESPACE TOKEN")
+        ##print("  OperatorChar  = OPERATOR TOKEN")
+        #print("  Newline       = NEWLINE TOKEN")
+        #print("  Comment       = COMMENT TOKEN")
+        #print("  UnicodeChar   = UNICODE_CHAR TOKEN")
+        
+        # File Reconstruction & Verification
+        #print("\n" + "="*80)
+        #print("Phase 3: File Reconstruction & Verification")
+        #print("="*80)
+        
+        # comment out to test
+        # make sure can reconstruct the original file
+        # then the parse function is work good
+        #output_reconstructed = filepath + ".reconstructed"
+        #verification = verify_parse_correctness(filepath, parse_tree, output_reconstructed)
+        #print(f"\nVerification Results:")
+        #print(f"  Original length: {verification['original_length']} characters")
+        #print(f"  Reconstructed length: {verification['reconstructed_length']} characters")
+        #if verification['identical']:
+        #    print(f"\n✅ Parse is CORRECT: Reconstructed file matches original exactly!")
+        #else:
+        #    print(f"\n❌ Parse has ERRORS: Reconstructed file differs from original")
+        #    if verification['differences']:
+        #        for diff in verification['differences'][:3]:
+        #            print(f"   {diff}")
+        
+        # Bash Script Generation
+        #print("\n" + "="*80)
+        #print("Phase 4: Bash Script Generation")
+        #print("="*80)
         
         output_bash = filepath + ".sh"
         bash_script, is_valid = generate_bash_script(parse_tree, filepath)
         
         if is_valid:
             save_bash_script(bash_script, output_bash)
+            #print(f"\n📝 Bash script preview:")
+            #print("-" * 40)
+            ## Show first 30 lines of preview
+            #preview_lines = bash_script.split('\n')[:30]
+            #for line in preview_lines:
+            #    print(line)
+            #if len(bash_script.split('\n')) > 30:
+            #    #print(f"... and {len(bash_script.split('\n')) - 30} more lines")
+            #    num = len(bash_script.split('\n'))
+            #    print(f"... and {num - 30} more lines")
+            #print("\ngenerate valid bash script")
         else:
             print("\n⚠️  Could not generate valid bash script")
         
         if not parser.validate():
             print("\n❌ Parse failed! Please check the errors above.")
+            #print("\n✅ Parse successful! The file follows the grammar rules.")
        
     except FileNotFoundError:
         print(f"Error: File '{filepath}' not found.")
@@ -1135,6 +1432,9 @@ def analyze_file(filepath: str) -> None:
 
 def main():
     """Main program entry point"""
+    print("when use not good, please go to")
+    print("    /home/heweiwei/ask-software/compiler/project_structure_compiler/compiler_1/Syntax_Analyzer/parse_release")
+    print("to edit")
     if len(sys.argv) > 1:
         analyze_file(sys.argv[1])
     else:
@@ -1143,10 +1443,12 @@ def main():
         print("="*80)
         print("\nAnalyzing tree-like directory structure and generating bash script")
         print("\n" + "-"*80)
-        print("\n" + "="*80)
+        #print("\n" + "="*80)
         print("To analyze your own tree structure file, run:")
-        print("Usage: tree2bash <file>")
-        print("="*80)
+        print("tree2bash <file>")
+        #print(f"python {sys.argv[0]} <filename>")
+        #print("Usage: tree2bash <file>")
+        #print("="*80)
 
 
 if __name__ == "__main__":
